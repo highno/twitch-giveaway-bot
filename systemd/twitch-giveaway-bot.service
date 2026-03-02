@@ -1,0 +1,14 @@
+[Unit]
+Description=Twitch Giveaway Bot
+After=network.target mysql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/twitch-giveaway-codex
+EnvironmentFile=/opt/twitch-giveaway-codex/.env
+ExecStart=/usr/bin/python3 -m giveaway_bot.bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
