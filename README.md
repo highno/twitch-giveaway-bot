@@ -41,6 +41,32 @@ Draw 3 winners across sessions 101,105,106:
 PYTHONPATH=src python -m giveaway_bot.draw --sessions 101,105,106 --winners 3 --desc "Finale Staffel 2"
 ```
 
+## Admin CLI
+Ticket-Statistik (pro User & Kanal):
+```bash
+PYTHONPATH=src python -m giveaway_bot.admin stats
+```
+
+Optional auf Kanal oder Zeitraum begrenzen:
+```bash
+PYTHONPATH=src python -m giveaway_bot.admin stats --channel-id 123456 --from 2024-01-01T00:00:00 --to 2024-01-31T23:59:59
+```
+
+Alle Tickets eines Users löschen (optional mit Kanal/Zeitraum-Filter):
+```bash
+PYTHONPATH=src python -m giveaway_bot.admin purge-user --user someviewer --from 2024-01-01T00:00:00
+```
+
+Alle Tickets im Topf löschen:
+```bash
+PYTHONPATH=src python -m giveaway_bot.admin purge-all-tickets
+```
+
+Kompletten Runtime-Status zurücksetzen (wie frisch installiert):
+```bash
+PYTHONPATH=src python -m giveaway_bot.admin reset-all --yes
+```
+
 ## Notes
 - Twitch does not provide a reliable per-user "viewer list". Presence via IRC membership is the practical solution.
 - Very large chats can produce high JOIN/PART traffic. If that becomes an issue, you can switch to message-based activity.

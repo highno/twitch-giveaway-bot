@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Optional
 
 IRC_HOST = "irc.chat.twitch.tv"
 IRC_PORT = 6667
@@ -9,8 +9,8 @@ class IRCChat:
     def __init__(self, nick: str, oauth_token: str):
         self.nick = nick
         self.oauth_token = oauth_token
-        self.reader: asyncio.StreamReader | None = None
-        self.writer: asyncio.StreamWriter | None = None
+        self.reader: Optional[asyncio.StreamReader] = None
+        self.writer: Optional[asyncio.StreamWriter] = None
 
     async def connect(self):
         self.reader, self.writer = await asyncio.open_connection(IRC_HOST, IRC_PORT)
@@ -26,6 +26,12 @@ class IRCChat:
 
     async def join(self, channel_login: str):
         self._send(f"JOIN #{channel_login}")
+
+    async def send_privmsg(self, channel_login: str, message: str):
+        clean = message.replace("\r", " ").replace("\n", " ").strip()
+        if not clean:
+            return
+        self._send(f"PRIVMSG #{channel_login} :{clean[:450]}")
 
     async def listen(
         self,
