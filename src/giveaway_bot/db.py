@@ -70,13 +70,13 @@ class Database:
         return await with_mysql_retry(_do)
 
     # --- Logging / channels ---
-    async def log_event(self, event_type: str, channel_id: int | None, payload_json: str | None):
+    async def log_event(self, event_type: str, channel_id: Optional[int], payload_json: Optional[str]):
         await self.exec(
             "INSERT INTO event_log(channel_id, event_type, payload) VALUES(%s,%s,%s)",
             (channel_id, event_type, payload_json),
         )
 
-    async def upsert_channel(self, channel_id: int, login: str, display_name: str | None):
+    async def upsert_channel(self, channel_id: int, login: str, display_name: Optional[str]):
         await self.exec(
             "INSERT INTO channels(id, login, display_name) VALUES(%s,%s,%s) "
             "ON DUPLICATE KEY UPDATE login=VALUES(login), display_name=VALUES(display_name)",
@@ -84,7 +84,7 @@ class Database:
         )
 
     # --- sessions ---
-    async def open_session(self, channel_id: int, started_at: datetime, title: str | None, category: str | None) -> int:
+    async def open_session(self, channel_id: int, started_at: datetime, title: Optional[str], category: Optional[str]) -> int:
         await self.exec(
             "UPDATE stream_sessions SET is_live=0, ended_at=IFNULL(ended_at,%s) "
             "WHERE channel_id=%s AND is_live=1",
@@ -107,7 +107,7 @@ class Database:
             (ended_at, channel_id),
         )
 
-    async def current_session_id(self, channel_id: int) -> int | None:
+    async def current_session_id(self, channel_id: int) -> Optional[int]:
         row = await self.fetchone(
             "SELECT session_id FROM stream_sessions WHERE channel_id=%s AND is_live=1 ORDER BY session_id DESC LIMIT 1",
             (channel_id,),
@@ -118,12 +118,12 @@ class Database:
     async def record_chat_message(
         self,
         channel_id: int,
-        session_id: int | None,
+        session_id: Optional[int],
         user_login: str,
-        user_display: str | None,
+        user_display: Optional[str],
         message: str,
         msg_ts: datetime,
-        raw_tags: str | None,
+        raw_tags: Optional[str],
     ):
         await self.exec(
             "INSERT INTO chat_messages(channel_id, session_id, user_login, user_display, message, msg_ts, raw_tags) "
@@ -164,7 +164,7 @@ class Database:
             raise
 
     # --- draw helpers ---
-    async def list_sessions(self, channel_id: int | None = None, limit: int = 50):
+    async def list_sessions(self, channel_id: Optional[int] = None, limit: int = 50):
         if channel_id:
             return await self.fetchall(
                 "SELECT session_id, channel_id, started_at, ended_at, title, category "
@@ -188,7 +188,7 @@ class Database:
         )
         return await self.fetchall(sql, tuple(session_ids))
 
-    async def create_draw_run(self, description: str | None):
+    async def create_draw_run(self, description: Optional[str]):
         await self.exec("INSERT INTO draw_runs(description) VALUES(%s)", (description,))
         row = await self.fetchone("SELECT LAST_INSERT_ID() AS id")
         return int(row["id"])
