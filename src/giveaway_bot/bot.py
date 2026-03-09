@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from giveaway_bot.config import Config
 from giveaway_bot.db import Database
@@ -28,7 +29,7 @@ async def run_with_backoff(coro_factory, name: str):
             await asyncio.sleep(delay)
             delay = min(delay * 2, 60)
 
-def is_ignored_user(cfg: Config, user_login: str, tags: str | None) -> bool:
+def is_ignored_user(cfg: Config, user_login: str, tags: Optional[str]) -> bool:
     ul = user_login.lower()
     if ul in cfg.ignored_logins:
         return True
