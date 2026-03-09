@@ -69,6 +69,7 @@ async def amain():
 
     # IRC
     irc = IRCChat(cfg.bot_nick, cfg.irc_oauth_token)
+    bot_login = cfg.bot_nick.strip().lower()
 
     async def on_join(ev: dict):
         cid = channel_login_to_id.get(ev["channel"])
@@ -89,26 +90,54 @@ async def amain():
         if not cid:
             return
 
-        if is_ignored_user(cfg, m["user_login"], m["tags"]):
+        user_login = m["user_login"].lower()
+        if user_login == bot_login:
             return
+
+        if is_ignored_user(cfg, user_login, m["tags"]):
+            return
+
+        msg_text = m["message"].strip()
+        msg_lower = msg_text.lower()
 
         session_id = await db.current_session_id(cid)
         await db.record_chat_message(
             channel_id=cid,
             session_id=session_id,
-            user_login=m["user_login"],
+            user_login=user_login,
             user_display=None,
             message=m["message"],
             msg_ts=m["ts"].astimezone(timezone.utc).replace(tzinfo=None),
             raw_tags=m["tags"],
         )
 
-        if m["message"].strip().lower() == cfg.optin_codeword:
+        if msg_lower == cfg.optin_codeword:
             await db.set_global_opt_in(
-                user_login=m["user_login"],
+                user_login=user_login,
                 ts=datetime.now(timezone.utc).replace(tzinfo=None),
             )
-            log.info("Global opt-in: %s", m["user_login"])
+            tickets_now = await db.count_tickets_for_user(user_login)
+            await irc.send_privmsg(
+                m["channel"],
+                f"@{user_login} Du nimmst jetzt an der Verlosung teil. Mit 'Anzahl_Tickets' siehst du jederzeit deinen Stand (aktuell: {tickets_now}).",
+            )
+            log.info("Global opt-in: %s", user_login)
+            return
+
+        if msg_lower == "anzahl_tickets":
+            is_opted_in = await db.is_user_globally_opted_in(user_login)
+            if not is_opted_in:
+                await irc.send_privmsg(
+                    m["channel"],
+                    f"@{user_login} Du bist noch nicht registriert. Schreibe '{cfg.optin_codeword}', um teilzunehmen.",
+                )
+                return
+
+            tickets_total = await db.count_tickets_for_user(user_login)
+            await irc.send_privmsg(
+                m["channel"],
+                f"@{user_login} Du hast aktuell {tickets_total} Ticket(s) im Lostopf.",
+            )
 
     async def irc_loop():
         await irc.connect()

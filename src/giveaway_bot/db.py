@@ -150,6 +150,13 @@ class Database:
         rows = await self.fetchall("SELECT user_login FROM global_opt_ins WHERE is_active=1", ())
         return [r["user_login"] for r in rows]
 
+    async def is_user_globally_opted_in(self, user_login: str) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 AS ok FROM global_opt_ins WHERE user_login=%s AND is_active=1 LIMIT 1",
+            (user_login,),
+        )
+        return bool(row)
+
     # --- tickets (idempotent) ---
     async def issue_ticket_bucketed(self, channel_id: int, session_id: int, user_login: str, issued_at: datetime, bucket_start: datetime):
         try:
@@ -162,6 +169,87 @@ class Database:
             if _mysql_err_code(e) == MYSQL_DUPLICATE_KEY:
                 return
             raise
+
+    async def count_tickets_for_user(
+        self,
+        user_login: str,
+        channel_id: Optional[int] = None,
+        start_ts: Optional[datetime] = None,
+        end_ts: Optional[datetime] = None,
+    ) -> int:
+        sql = "SELECT COUNT(*) AS c FROM tickets WHERE user_login=%s"
+        args: list[Any] = [user_login]
+        if channel_id is not None:
+            sql += " AND channel_id=%s"
+            args.append(channel_id)
+        if start_ts is not None:
+            sql += " AND issued_at >= %s"
+            args.append(start_ts)
+        if end_ts is not None:
+            sql += " AND issued_at <= %s"
+            args.append(end_ts)
+        row = await self.fetchone(sql, tuple(args))
+        return int(row["c"]) if row else 0
+
+    async def ticket_stats_per_user_channel(
+        self,
+        channel_id: Optional[int] = None,
+        start_ts: Optional[datetime] = None,
+        end_ts: Optional[datetime] = None,
+    ) -> list[dict[str, Any]]:
+        sql = (
+            "SELECT t.user_login, t.channel_id, c.login AS channel_login, COUNT(*) AS tickets "
+            "FROM tickets t "
+            "JOIN channels c ON c.id=t.channel_id "
+            "WHERE 1=1"
+        )
+        args: list[Any] = []
+        if channel_id is not None:
+            sql += " AND t.channel_id=%s"
+            args.append(channel_id)
+        if start_ts is not None:
+            sql += " AND t.issued_at >= %s"
+            args.append(start_ts)
+        if end_ts is not None:
+            sql += " AND t.issued_at <= %s"
+            args.append(end_ts)
+        sql += " GROUP BY t.user_login, t.channel_id, c.login ORDER BY tickets DESC, t.user_login ASC"
+        return await self.fetchall(sql, tuple(args))
+
+    async def delete_tickets_for_user(
+        self,
+        user_login: str,
+        channel_id: Optional[int] = None,
+        start_ts: Optional[datetime] = None,
+        end_ts: Optional[datetime] = None,
+    ) -> int:
+        sql = "DELETE FROM tickets WHERE user_login=%s"
+        args: list[Any] = [user_login]
+        if channel_id is not None:
+            sql += " AND channel_id=%s"
+            args.append(channel_id)
+        if start_ts is not None:
+            sql += " AND issued_at >= %s"
+            args.append(start_ts)
+        if end_ts is not None:
+            sql += " AND issued_at <= %s"
+            args.append(end_ts)
+        return int(await self.exec(sql, tuple(args)))
+
+    async def delete_all_tickets(self) -> int:
+        return int(await self.exec("DELETE FROM tickets", ()))
+
+    async def reset_all_state(self):
+        await self.exec("DELETE FROM winners", ())
+        await self.exec("DELETE FROM draw_run_sessions", ())
+        await self.exec("DELETE FROM draw_runs", ())
+        await self.exec("DELETE FROM tickets", ())
+        await self.exec("DELETE FROM activity_heartbeats", ())
+        await self.exec("DELETE FROM chat_messages", ())
+        await self.exec("DELETE FROM global_opt_ins", ())
+        await self.exec("DELETE FROM stream_sessions", ())
+        await self.exec("DELETE FROM event_log", ())
+        await self.exec("DELETE FROM channels", ())
 
     # --- draw helpers ---
     async def list_sessions(self, channel_id: Optional[int] = None, limit: int = 50):

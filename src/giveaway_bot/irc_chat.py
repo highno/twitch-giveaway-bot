@@ -27,6 +27,12 @@ class IRCChat:
     async def join(self, channel_login: str):
         self._send(f"JOIN #{channel_login}")
 
+    async def send_privmsg(self, channel_login: str, message: str):
+        clean = message.replace("\r", " ").replace("\n", " ").strip()
+        if not clean:
+            return
+        self._send(f"PRIVMSG #{channel_login} :{clean[:450]}")
+
     async def listen(
         self,
         on_privmsg: Callable[[dict], Awaitable[None]],
