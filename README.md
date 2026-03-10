@@ -30,6 +30,11 @@ mysql -u bot -p twitch_giveaway < migrations/003_global_optins_and_draws.sql
 PYTHONPATH=src python -m giveaway_bot.bot
 ```
 
+Optional ohne Logdatei:
+```bash
+PYTHONPATH=src python -m giveaway_bot.bot --no-log
+```
+
 ## Draw (weighted, multi-session)
 List sessions:
 ```bash
@@ -70,3 +75,12 @@ PYTHONPATH=src python -m giveaway_bot.admin reset-all --yes
 ## Notes
 - Twitch does not provide a reliable per-user "viewer list". Presence via IRC membership is the practical solution.
 - Very large chats can produce high JOIN/PART traffic. If that becomes an issue, you can switch to message-based activity.
+
+
+## Chat-Kommandos
+- `OPTIN_CODEWORD`: Einmalige globale Teilnahme.
+- `COMMAND_TICKET_COUNT`: Ticketstand abrufen (vorher hartkodiert als `Anzahl_Tickets`).
+- `COMMAND_PAUSE_PARTICIPATION`: Temporärer Ausstieg (keine neuen Tickets).
+- `COMMAND_DELETE_USER_DATA`: Löscht alle User-Daten, nur nach temporärem Ausstieg erlaubt.
+
+Alle Bot-Antworten auf diese Kommandos sind über `RESPONSE_*` Variablen in `.env` anpassbar.
