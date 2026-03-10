@@ -104,6 +104,14 @@ async def amain():
             return
 
         presence.setdefault(cid, set()).add(user_login)
+        session_id = await db.current_session_id(cid)
+        await db.record_presence_event(
+            channel_id=cid,
+            session_id=session_id,
+            user_login=user_login,
+            event_type="join",
+            event_ts=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
         if user_login in tracked_users:
             log.info("Tracked user joined channel: channel=%s user=%s", ev["channel"], user_login)
 
@@ -118,6 +126,14 @@ async def amain():
             return
 
         presence.setdefault(cid, set()).discard(user_login)
+        session_id = await db.current_session_id(cid)
+        await db.record_presence_event(
+            channel_id=cid,
+            session_id=session_id,
+            user_login=user_login,
+            event_type="part",
+            event_ts=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
         if user_login in tracked_users:
             log.info("Tracked user left channel: channel=%s user=%s", ev["channel"], user_login)
 

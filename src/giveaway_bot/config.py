@@ -71,6 +71,12 @@ class Config:
     ignored_logins: set[str] = None
     ignore_verified_bots: bool = _bool("IGNORE_VERIFIED_BOTS", "1")
 
+    admin_web_host: str = os.getenv("ADMIN_WEB_HOST", "0.0.0.0")
+    admin_web_port: int = int(os.getenv("ADMIN_WEB_PORT", "8080"))
+    admin_web_base_path: str = os.getenv("ADMIN_WEB_BASE_PATH", "/admin").strip() or "/"
+    admin_web_username: str = os.getenv("ADMIN_WEB_USERNAME", "admin").strip()
+    admin_web_password: str = os.getenv("ADMIN_WEB_PASSWORD", "change-me").strip()
+
     def __post_init__(self):
         object.__setattr__(
             self,

@@ -1,22 +1,10 @@
 import argparse
-import random
-from datetime import datetime
 import asyncio
 
 from giveaway_bot.config import Config
 from giveaway_bot.db import Database
+from giveaway_bot.raffle import run_draw
 
-def weighted_sample_without_replacement(items, k):
-    # Efraimidis–Spirakis: key = U^(1/w); pick top-k
-    keys = []
-    for user, w in items:
-        if w <= 0:
-            continue
-        u = random.random()
-        key = u ** (1.0 / w)
-        keys.append((key, user, w))
-    keys.sort(reverse=True, key=lambda x: x[0])
-    return [(user, w) for _, user, w in keys[:k]]
 
 async def amain():
     ap = argparse.ArgumentParser()
@@ -25,6 +13,11 @@ async def amain():
     ap.add_argument("--sessions", type=str, default="", help="Comma-separated session_ids to include in the draw")
     ap.add_argument("--winners", type=int, default=1, help="Number of winners to draw")
     ap.add_argument("--desc", type=str, default="", help="Description stored with draw run")
+    ap.add_argument(
+        "--exclude-previous-winners",
+        action="store_true",
+        help="Exclude users that have already won in any previous draw.",
+    )
     args = ap.parse_args()
 
     cfg = Config()
@@ -45,26 +38,25 @@ async def amain():
             raise SystemExit("Provide --sessions 123,124,... or use --list")
 
         session_ids = [int(x.strip()) for x in args.sessions.split(",") if x.strip()]
-        agg = await db.tickets_aggregate_for_sessions(session_ids)
-        if not agg:
-            raise SystemExit("No tickets found for given sessions.")
-
-        items = [(r["user_login"], int(r["tickets"])) for r in agg]
-        picks = weighted_sample_without_replacement(items, args.winners)
-
-        draw_id = await db.create_draw_run(args.desc or f"Draw {datetime.utcnow().isoformat()}Z")
-        await db.add_draw_sessions(draw_id, session_ids)
+        draw_id, picks = await run_draw(
+            db,
+            session_ids=session_ids,
+            winners=args.winners,
+            description=args.desc,
+            exclude_past_winners=args.exclude_previous_winners,
+        )
 
         print(f"draw_id={draw_id}")
         for user, w in picks:
-            await db.add_winner(draw_id, user, w)
             print(f"WINNER: {user} (tickets={w})")
 
     finally:
         await db.close()
 
+
 def main():
     asyncio.run(amain())
+
 
 if __name__ == "__main__":
     main()
