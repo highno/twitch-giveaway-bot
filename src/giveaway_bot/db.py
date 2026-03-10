@@ -76,6 +76,19 @@ class Database:
             (channel_id, event_type, payload_json),
         )
 
+    async def record_presence_event(
+        self,
+        channel_id: int,
+        session_id: Optional[int],
+        user_login: str,
+        event_type: str,
+        event_ts: datetime,
+    ):
+        await self.exec(
+            "INSERT INTO presence_events(channel_id, session_id, user_login, event_type, event_ts) VALUES(%s,%s,%s,%s,%s)",
+            (channel_id, session_id, user_login, event_type, event_ts),
+        )
+
     async def upsert_channel(self, channel_id: int, login: str, display_name: Optional[str]):
         await self.exec(
             "INSERT INTO channels(id, login, display_name) VALUES(%s,%s,%s) "
@@ -175,6 +188,7 @@ class Database:
         await self.exec("DELETE FROM tickets WHERE user_login=%s", (user_login,))
         await self.exec("DELETE FROM activity_heartbeats WHERE user_login=%s", (user_login,))
         await self.exec("DELETE FROM chat_messages WHERE user_login=%s", (user_login,))
+        await self.exec("DELETE FROM presence_events WHERE user_login=%s", (user_login,))
         await self.exec("DELETE FROM global_opt_ins WHERE user_login=%s", (user_login,))
 
 
@@ -268,6 +282,7 @@ class Database:
         await self.exec("DELETE FROM tickets", ())
         await self.exec("DELETE FROM activity_heartbeats", ())
         await self.exec("DELETE FROM chat_messages", ())
+        await self.exec("DELETE FROM presence_events", ())
         await self.exec("DELETE FROM global_opt_ins", ())
         await self.exec("DELETE FROM stream_sessions", ())
         await self.exec("DELETE FROM event_log", ())
@@ -287,15 +302,17 @@ class Database:
             (limit,),
         )
 
-    async def tickets_aggregate_for_sessions(self, session_ids: list[int]) -> list[dict]:
+    async def tickets_aggregate_for_sessions(self, session_ids: list[int], exclude_past_winners: bool = False) -> list[dict]:
         if not session_ids:
             return []
         placeholders = ",".join(["%s"] * len(session_ids))
         sql = (
-            f"SELECT user_login, COUNT(*) AS tickets "
-            f"FROM tickets WHERE session_id IN ({placeholders}) "
-            f"GROUP BY user_login"
+            f"SELECT t.user_login, COUNT(*) AS tickets "
+            f"FROM tickets t WHERE t.session_id IN ({placeholders}) "
         )
+        if exclude_past_winners:
+            sql += "AND NOT EXISTS (SELECT 1 FROM winners w WHERE w.user_login=t.user_login) "
+        sql += "GROUP BY t.user_login"
         return await self.fetchall(sql, tuple(session_ids))
 
     async def create_draw_run(self, description: Optional[str]):
@@ -315,3 +332,134 @@ class Database:
             "INSERT INTO winners(draw_id, user_login, weight_tickets) VALUES(%s,%s,%s)",
             (draw_id, user_login, weight_tickets),
         )
+
+
+    async def draw_runs(self, limit: int = 100) -> list[dict[str, Any]]:
+        sql = (
+            "SELECT dr.draw_id, dr.created_at, dr.description, COUNT(w.winner_id) AS winner_count "
+            "FROM draw_runs dr "
+            "LEFT JOIN winners w ON w.draw_id=dr.draw_id "
+            "GROUP BY dr.draw_id, dr.created_at, dr.description "
+            "ORDER BY dr.draw_id DESC LIMIT %s"
+        )
+        return await self.fetchall(sql, (limit,))
+
+    async def draw_winners(self, draw_id: int) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            "SELECT winner_id, user_login, weight_tickets, created_at FROM winners WHERE draw_id=%s ORDER BY winner_id ASC",
+            (draw_id,),
+        )
+
+    async def delete_draw(self, draw_id: int) -> None:
+        await self.exec("DELETE FROM winners WHERE draw_id=%s", (draw_id,))
+        await self.exec("DELETE FROM draw_run_sessions WHERE draw_id=%s", (draw_id,))
+        await self.exec("DELETE FROM draw_runs WHERE draw_id=%s", (draw_id,))
+
+    async def detected_viewer_minutes_total(
+        self,
+        ticket_interval_minutes: int,
+        channel_id: Optional[int] = None,
+        start_ts: Optional[datetime] = None,
+        end_ts: Optional[datetime] = None,
+    ) -> int:
+        sql = "SELECT COUNT(*) AS c FROM tickets WHERE 1=1"
+        args: list[Any] = []
+        if channel_id is not None:
+            sql += " AND channel_id=%s"
+            args.append(channel_id)
+        if start_ts is not None:
+            sql += " AND issued_at >= %s"
+            args.append(start_ts)
+        if end_ts is not None:
+            sql += " AND issued_at <= %s"
+            args.append(end_ts)
+        row = await self.fetchone(sql, tuple(args))
+        return int((int(row["c"]) if row else 0) * ticket_interval_minutes)
+
+    async def user_ticket_leaderboard(self, limit: int = 200) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            "SELECT user_login, COUNT(*) AS tickets FROM tickets GROUP BY user_login ORDER BY tickets DESC, user_login ASC LIMIT %s",
+            (limit,),
+        )
+
+    async def user_minutes_leaderboard(self, ticket_interval_minutes: int, limit: int = 200) -> list[dict[str, Any]]:
+        rows = await self.user_ticket_leaderboard(limit=limit)
+        return [
+            {"user_login": r["user_login"], "minutes": int(r["tickets"]) * ticket_interval_minutes, "tickets": int(r["tickets"])}
+            for r in rows
+        ]
+
+    async def user_ticket_timeline(
+        self,
+        user_login: str,
+        channel_id: Optional[int] = None,
+        start_ts: Optional[datetime] = None,
+        end_ts: Optional[datetime] = None,
+        sort_by: str = "time",
+    ) -> list[dict[str, Any]]:
+        sql = (
+            "SELECT t.ticket_id, t.channel_id, c.login AS channel_login, t.session_id, t.issued_at, t.bucket_start "
+            "FROM tickets t JOIN channels c ON c.id=t.channel_id WHERE t.user_login=%s"
+        )
+        args: list[Any] = [user_login]
+        if channel_id is not None:
+            sql += " AND t.channel_id=%s"
+            args.append(channel_id)
+        if start_ts is not None:
+            sql += " AND t.issued_at >= %s"
+            args.append(start_ts)
+        if end_ts is not None:
+            sql += " AND t.issued_at <= %s"
+            args.append(end_ts)
+        if sort_by == "channel_time":
+            sql += " ORDER BY t.channel_id ASC, t.issued_at DESC"
+        else:
+            sql += " ORDER BY t.issued_at DESC"
+        return await self.fetchall(sql, tuple(args))
+
+
+    async def currently_present_users(self, channel_id: Optional[int] = None) -> list[dict[str, Any]]:
+        sql = (
+            "SELECT pe.channel_id, c.login AS channel_login, pe.user_login, pe.event_ts AS joined_at "
+            "FROM presence_events pe "
+            "JOIN channels c ON c.id=pe.channel_id "
+            "JOIN ("
+            "  SELECT channel_id, user_login, MAX(event_ts) AS max_ts "
+            "  FROM presence_events GROUP BY channel_id, user_login"
+            ") latest ON latest.channel_id=pe.channel_id AND latest.user_login=pe.user_login AND latest.max_ts=pe.event_ts "
+            "WHERE pe.event_type='join'"
+        )
+        args: list[Any] = []
+        if channel_id is not None:
+            sql += " AND pe.channel_id=%s"
+            args.append(channel_id)
+        sql += " ORDER BY pe.channel_id ASC, pe.event_ts DESC, pe.user_login ASC"
+        return await self.fetchall(sql, tuple(args))
+
+    async def user_presence_timeline(
+        self,
+        user_login: str,
+        channel_id: Optional[int] = None,
+        start_ts: Optional[datetime] = None,
+        end_ts: Optional[datetime] = None,
+        sort_by: str = "time",
+    ) -> list[dict[str, Any]]:
+        sql = (
+            "SELECT pe.presence_event_id, pe.channel_id, c.login AS channel_login, pe.session_id, pe.event_type, pe.event_ts "
+            "FROM presence_events pe JOIN channels c ON c.id=pe.channel_id WHERE pe.user_login=%s"
+        )
+        args: list[Any] = [user_login]
+        if channel_id is not None:
+            sql += " AND pe.channel_id=%s"
+            args.append(channel_id)
+        if start_ts is not None:
+            sql += " AND pe.event_ts >= %s"
+            args.append(start_ts)
+        if end_ts is not None:
+            sql += " AND pe.event_ts <= %s"
+            args.append(end_ts)
+        if sort_by == "channel_time":
+            sql += " ORDER BY pe.channel_id ASC, pe.event_ts DESC"
+        else:
+            sql += " ORDER BY pe.event_ts DESC"
+        return await self.fetchall(sql, tuple(args))
