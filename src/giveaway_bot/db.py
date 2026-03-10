@@ -156,18 +156,40 @@ class Database:
             (user_login,),
         )
         return bool(row)
+    async def pause_global_opt_in(self, user_login: str, ts: datetime) -> bool:
+        rc = await self.exec(
+            "UPDATE global_opt_ins SET is_active=0, revoked_at=%s WHERE user_login=%s AND is_active=1",
+            (ts, user_login),
+        )
+        return rc > 0
+
+    async def has_global_opt_in_record(self, user_login: str) -> bool:
+        row = await self.fetchone(
+            "SELECT 1 AS ok FROM global_opt_ins WHERE user_login=%s LIMIT 1",
+            (user_login,),
+        )
+        return bool(row)
+
+    async def delete_all_user_data(self, user_login: str) -> None:
+        await self.exec("DELETE FROM winners WHERE user_login=%s", (user_login,))
+        await self.exec("DELETE FROM tickets WHERE user_login=%s", (user_login,))
+        await self.exec("DELETE FROM activity_heartbeats WHERE user_login=%s", (user_login,))
+        await self.exec("DELETE FROM chat_messages WHERE user_login=%s", (user_login,))
+        await self.exec("DELETE FROM global_opt_ins WHERE user_login=%s", (user_login,))
+
 
     # --- tickets (idempotent) ---
-    async def issue_ticket_bucketed(self, channel_id: int, session_id: int, user_login: str, issued_at: datetime, bucket_start: datetime):
+    async def issue_ticket_bucketed(self, channel_id: int, session_id: int, user_login: str, issued_at: datetime, bucket_start: datetime) -> bool:
         try:
             await self.exec(
                 "INSERT INTO tickets(channel_id, session_id, user_login, issued_at, bucket_start, reason) "
                 "VALUES(%s,%s,%s,%s,%s,'present_10min')",
                 (channel_id, session_id, user_login, issued_at, bucket_start),
             )
+            return True
         except Exception as e:
             if _mysql_err_code(e) == MYSQL_DUPLICATE_KEY:
-                return
+                return False
             raise
 
     async def count_tickets_for_user(
