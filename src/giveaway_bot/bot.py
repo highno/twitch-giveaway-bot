@@ -4,8 +4,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-EVENTSUB_CHANNELS_PER_CONNECTION = 5
-
 from giveaway_bot.config import Config
 from giveaway_bot.db import Database
 from giveaway_bot.twitch_api import TwitchAPI
@@ -297,7 +295,11 @@ async def amain():
         await irc.listen(on_privmsg=on_privmsg, on_join=on_join, on_part=on_part)
 
     # EventSub (reconnect + token refresh)
-    channel_id_chunks = [channel_ids[i:i + EVENTSUB_CHANNELS_PER_CONNECTION] for i in range(0, len(channel_ids), EVENTSUB_CHANNELS_PER_CONNECTION)]
+    channels_per_eventsub_connection = cfg.eventsub_channels_per_connection
+    channel_id_chunks = [
+        channel_ids[i:i + channels_per_eventsub_connection]
+        for i in range(0, len(channel_ids), channels_per_eventsub_connection)
+    ]
 
     eventsub_clients: list[tuple[EventSubWS, list[int]]] = [
         (EventSubWS(cfg.twitch_client_id, token_mgr), chunk) for chunk in channel_id_chunks
@@ -337,7 +339,12 @@ async def amain():
             log.info("OFFLINE: channel_id=%s", cid)
 
     async def eventsub_loop(eventsub: EventSubWS, chunk: list[int], index: int):
-        log.info("Starting EventSub shard %s for %s channels", index + 1, len(chunk))
+        log.info(
+            "Starting EventSub shard %s for %s channels (max=%s per connection)",
+            index + 1,
+            len(chunk),
+            channels_per_eventsub_connection,
+        )
         await eventsub.run(on_msg=on_eventsub, subscribe_fn=lambda: subscribe_chunk(eventsub, chunk))
 
     async def on_ticket_issued(channel_id: int, session_id: int, user_login: str, bucket_start: datetime):
