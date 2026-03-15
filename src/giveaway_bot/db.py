@@ -316,6 +316,17 @@ class Database:
             (limit,),
         )
 
+    async def repair_session_start_times(self, max_shift_hours: int = 14) -> int:
+        max_shift_seconds = int(max_shift_hours * 3600)
+        return int(await self.exec(
+            "UPDATE stream_sessions "
+            "SET started_at = DATE_SUB(started_at, INTERVAL %s SECOND) "
+            "WHERE started_at IS NOT NULL AND ended_at IS NOT NULL "
+            "AND started_at > ended_at "
+            "AND TIMESTAMPDIFF(SECOND, ended_at, started_at) BETWEEN 1 AND %s",
+            (max_shift_seconds, max_shift_seconds),
+        ))
+
     async def get_open_sessions(self) -> list[dict[str, Any]]:
         return await self.fetchall(
             "SELECT session_id, channel_id, started_at, ended_at, stream_id FROM stream_sessions WHERE is_live=1",
