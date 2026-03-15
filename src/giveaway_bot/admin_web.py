@@ -217,7 +217,7 @@ def render_page(request: web.Request, title: str, body: str) -> str:
       if (!raw) return;
       const dt = new Date(raw.replace(' ', 'T') + 'Z');
       if (Number.isNaN(dt.getTime())) return;
-      node.textContent = dt.toLocaleString('de-DE', { timeZone: displayTimeZone });
+      node.textContent = dt.toLocaleString('de-DE', {{ timeZone: displayTimeZone }});
       node.dataset.sortValue = String(dt.getTime());
       node.title = `UTC: ${{raw}}`;
     }});
