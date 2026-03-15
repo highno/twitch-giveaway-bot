@@ -97,16 +97,23 @@ class Database:
         )
 
     # --- sessions ---
-    async def open_session(self, channel_id: int, started_at: datetime, title: Optional[str], category: Optional[str]) -> int:
+    async def open_session(
+        self,
+        channel_id: int,
+        started_at: datetime,
+        title: Optional[str],
+        category: Optional[str],
+        stream_id: Optional[str] = None,
+    ) -> int:
         await self.exec(
             "UPDATE stream_sessions SET is_live=0, ended_at=IFNULL(ended_at,%s) "
             "WHERE channel_id=%s AND is_live=1",
             (started_at, channel_id),
         )
         await self.exec(
-            "INSERT INTO stream_sessions(channel_id, started_at, title, category, is_live) "
-            "VALUES(%s,%s,%s,%s,1)",
-            (channel_id, started_at, title, category),
+            "INSERT INTO stream_sessions(channel_id, started_at, title, category, stream_id, is_live) "
+            "VALUES(%s,%s,%s,%s,%s,1)",
+            (channel_id, started_at, title, category, stream_id),
         )
         row = await self.fetchone(
             "SELECT session_id FROM stream_sessions WHERE channel_id=%s AND is_live=1 ORDER BY session_id DESC LIMIT 1",
@@ -114,7 +121,13 @@ class Database:
         )
         return int(row["session_id"])
 
-    async def close_session(self, channel_id: int, ended_at: datetime):
+    async def close_session(self, channel_id: int, ended_at: datetime, stream_id: Optional[str] = None):
+        if stream_id:
+            await self.exec(
+                "UPDATE stream_sessions SET is_live=0, ended_at=%s WHERE channel_id=%s AND is_live=1 AND stream_id=%s",
+                (ended_at, channel_id, stream_id),
+            )
+            return
         await self.exec(
             "UPDATE stream_sessions SET is_live=0, ended_at=%s WHERE channel_id=%s AND is_live=1",
             (ended_at, channel_id),
@@ -292,14 +305,33 @@ class Database:
     async def list_sessions(self, channel_id: Optional[int] = None, limit: int = 50):
         if channel_id:
             return await self.fetchall(
-                "SELECT session_id, channel_id, started_at, ended_at, title, category "
-                "FROM stream_sessions WHERE channel_id=%s ORDER BY started_at DESC LIMIT %s",
+                "SELECT s.session_id, s.channel_id, c.login AS channel_login, s.started_at, s.ended_at, s.title, s.category, s.stream_id "
+                "FROM stream_sessions s JOIN channels c ON c.id=s.channel_id "
+                "WHERE s.channel_id=%s ORDER BY s.started_at DESC LIMIT %s",
                 (channel_id, limit),
             )
         return await self.fetchall(
-            "SELECT session_id, channel_id, started_at, ended_at, title, category "
-            "FROM stream_sessions ORDER BY started_at DESC LIMIT %s",
+            "SELECT s.session_id, s.channel_id, c.login AS channel_login, s.started_at, s.ended_at, s.title, s.category, s.stream_id "
+            "FROM stream_sessions s JOIN channels c ON c.id=s.channel_id ORDER BY s.started_at DESC LIMIT %s",
             (limit,),
+        )
+
+    async def get_open_sessions(self) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            "SELECT session_id, channel_id, started_at, ended_at, stream_id FROM stream_sessions WHERE is_live=1",
+            (),
+        )
+
+    async def touch_session_heartbeat(
+        self,
+        session_id: int,
+        title: Optional[str],
+        category: Optional[str],
+        stream_id: Optional[str],
+    ) -> None:
+        await self.exec(
+            "UPDATE stream_sessions SET title=COALESCE(%s,title), category=COALESCE(%s,category), stream_id=COALESCE(%s,stream_id), is_live=1 WHERE session_id=%s",
+            (title, category, stream_id, session_id),
         )
 
     async def tickets_aggregate_for_sessions(self, session_ids: list[int], exclude_past_winners: bool = False) -> list[dict]:

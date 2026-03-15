@@ -330,12 +330,14 @@ async def amain():
             started_at = datetime.now(timezone.utc).replace(tzinfo=None)
             title = event.get("title")
             category = event.get("category_name") or event.get("game_name")
-            await db.open_session(cid, started_at, title, category)
+            stream_id = str(event.get("id") or "") or None
+            await db.open_session(cid, started_at, title, category, stream_id=stream_id)
             log.info("LIVE: channel_id=%s", cid)
 
         elif sub_type == "stream.offline":
             ended_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            await db.close_session(cid, ended_at)
+            stream_id = str(event.get("id") or "") or None
+            await db.close_session(cid, ended_at, stream_id=stream_id)
             log.info("OFFLINE: channel_id=%s", cid)
 
     async def eventsub_loop(eventsub: EventSubWS, chunk: list[int], index: int):
@@ -346,6 +348,59 @@ async def amain():
             channels_per_eventsub_connection,
         )
         await eventsub.run(on_msg=on_eventsub, subscribe_fn=lambda: subscribe_chunk(eventsub, chunk))
+
+    async def sync_live_streams() -> None:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        streams = await helix.get_streams_by_user_ids(channel_ids)
+        streams_by_channel: dict[int, dict] = {}
+        for stream in streams:
+            user_id = stream.get("user_id")
+            if not user_id:
+                continue
+            streams_by_channel[int(user_id)] = stream
+
+        open_sessions = await db.get_open_sessions()
+        open_by_channel = {int(row["channel_id"]): row for row in open_sessions}
+
+        for cid in channel_ids:
+            stream = streams_by_channel.get(cid)
+            if stream:
+                stream_id = str(stream.get("id") or "") or None
+                title = stream.get("title")
+                category = stream.get("game_name")
+                existing = open_by_channel.get(cid)
+                if existing:
+                    await db.touch_session_heartbeat(
+                        int(existing["session_id"]),
+                        title=title,
+                        category=category,
+                        stream_id=stream_id,
+                    )
+                else:
+                    await db.open_session(
+                        channel_id=cid,
+                        started_at=now,
+                        title=title,
+                        category=category,
+                        stream_id=stream_id,
+                    )
+                    log.info("Recovered missing live session: channel_id=%s stream_id=%s", cid, stream_id)
+                continue
+
+            existing = open_by_channel.get(cid)
+            if existing:
+                await db.close_session(
+                    channel_id=cid,
+                    ended_at=now,
+                    stream_id=str(existing.get("stream_id") or "") or None,
+                )
+                log.info("Closed stale open session: channel_id=%s session_id=%s", cid, existing["session_id"])
+
+    async def stream_reconcile_loop() -> None:
+        await sync_live_streams()
+        while True:
+            await asyncio.sleep(90)
+            await sync_live_streams()
 
     async def on_ticket_issued(channel_id: int, session_id: int, user_login: str, bucket_start: datetime):
         channel_login = channel_id_to_login.get(channel_id, str(channel_id))
@@ -362,6 +417,7 @@ async def amain():
     tasks = [
         run_with_backoff(irc_loop, "irc"),
         run_with_backoff(lambda: scheduler.run(channel_ids), "scheduler"),
+        run_with_backoff(stream_reconcile_loop, "stream-reconcile"),
     ]
     for index, (eventsub, chunk) in enumerate(eventsub_clients):
         tasks.append(
