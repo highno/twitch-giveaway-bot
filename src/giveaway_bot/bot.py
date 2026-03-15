@@ -6,7 +6,7 @@ from typing import Optional
 
 from giveaway_bot.config import Config
 from giveaway_bot.db import Database
-from giveaway_bot.twitch_api import TwitchAPI
+from giveaway_bot.twitch_api import TwitchAPI, parse_twitch_utc_datetime
 from giveaway_bot.token_manager import TokenManager
 from giveaway_bot.eventsub_ws import EventSubWS
 from giveaway_bot.irc_chat import IRCChat
@@ -60,6 +60,9 @@ async def amain():
 
     db = Database(cfg.mysql_host, cfg.mysql_port, cfg.mysql_user, cfg.mysql_password, cfg.mysql_db)
     await db.connect()
+    repaired = await db.repair_session_start_times()
+    if repaired:
+        log.warning("Corrected session start timestamps for %s session(s)", repaired)
 
     token_mgr = TokenManager(
         client_id=cfg.twitch_client_id,
@@ -327,7 +330,7 @@ async def amain():
         cid = int(bid)
 
         if sub_type == "stream.online":
-            started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            started_at = parse_twitch_utc_datetime(event.get("started_at")) or datetime.now(timezone.utc).replace(tzinfo=None)
             title = event.get("title")
             category = event.get("category_name") or event.get("game_name")
             stream_id = str(event.get("id") or "") or None
@@ -377,9 +380,10 @@ async def amain():
                         stream_id=stream_id,
                     )
                 else:
+                    stream_started_at = parse_twitch_utc_datetime(stream.get("started_at")) or now
                     await db.open_session(
                         channel_id=cid,
-                        started_at=now,
+                        started_at=stream_started_at,
                         title=title,
                         category=category,
                         stream_id=stream_id,

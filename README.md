@@ -102,6 +102,7 @@ Features:
 - HTTP Basic Auth via `.env` (`ADMIN_WEB_USERNAME`, `ADMIN_WEB_PASSWORD`)
 - Port/Host konfigurierbar (`ADMIN_WEB_HOST`, `ADMIN_WEB_PORT`)
 - Frei wählbarer Root-Pfad (`ADMIN_WEB_BASE_PATH`, z. B. `/admin` hinter TLS-Proxy)
+- Feste Anzeige-Zeitzone für Datumsfelder (`ADMIN_WEB_TIMEZONE`, Standard `Europe/Berlin`)
 - Filterbare Statistik wie im CLI inkl. Liste aktuell als anwesend erkannter User pro Kanal
 - User-Detailansicht mit Ticket-Timeline + JOIN/PART-Presence-Events (soweit technisch erfassbar)
 - Auslosung inkl. Option „frühere Gewinner ausschließen“

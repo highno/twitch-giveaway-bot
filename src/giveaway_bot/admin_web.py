@@ -53,6 +53,7 @@ def nav_html(request: web.Request) -> str:
 
 
 def render_page(request: web.Request, title: str, body: str) -> str:
+    timezone_name = escape(request.app["cfg"].admin_web_timezone)
     return f"""<!DOCTYPE html>
 <html lang='de'>
 <head>
@@ -200,6 +201,7 @@ def render_page(request: web.Request, title: str, body: str) -> str:
 </div>
 <script>
 (function() {{
+  const displayTimeZone = '{timezone_name}';
   function applyTheme() {{
     const root = document.documentElement;
     const stored = localStorage.getItem('admin-theme');
@@ -215,7 +217,7 @@ def render_page(request: web.Request, title: str, body: str) -> str:
       if (!raw) return;
       const dt = new Date(raw.replace(' ', 'T') + 'Z');
       if (Number.isNaN(dt.getTime())) return;
-      node.textContent = dt.toLocaleString('de-DE');
+      node.textContent = dt.toLocaleString('de-DE', { timeZone: displayTimeZone });
       node.dataset.sortValue = String(dt.getTime());
       node.title = `UTC: ${{raw}}`;
     }});
@@ -230,8 +232,8 @@ def render_page(request: web.Request, title: str, body: str) -> str:
     if (type === 'datetime') {{
       const timestamp = Number(v);
       if (!Number.isNaN(timestamp) && timestamp > 0) return timestamp;
-      const t = Date.parse(v.replace(' ', 'T'));
-      return Number.isNaN(t) ? 0 : t;
+      const parsed = Date.parse(v.replace(' ', 'T') + 'Z');
+      return Number.isNaN(parsed) ? 0 : parsed;
     }}
     return v.toLowerCase();
   }}
@@ -659,6 +661,9 @@ async def create_app() -> web.Application:
     cfg = Config()
     db = Database(cfg.mysql_host, cfg.mysql_port, cfg.mysql_user, cfg.mysql_password, cfg.mysql_db)
     await db.connect()
+    repaired = await db.repair_session_start_times()
+    if repaired:
+        print(f"Session-Startzeiten korrigiert: {repaired}")
 
     app = web.Application(middlewares=[auth_middleware])
     app["cfg"] = cfg

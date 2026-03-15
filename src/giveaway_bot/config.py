@@ -77,6 +77,7 @@ class Config:
     admin_web_base_path: str = os.getenv("ADMIN_WEB_BASE_PATH", "/admin").strip() or "/"
     admin_web_username: str = os.getenv("ADMIN_WEB_USERNAME", "admin").strip()
     admin_web_password: str = os.getenv("ADMIN_WEB_PASSWORD", "change-me").strip()
+    admin_web_timezone: str = os.getenv("ADMIN_WEB_TIMEZONE", "Europe/Berlin").strip() or "Europe/Berlin"
 
     def __post_init__(self):
         object.__setattr__(

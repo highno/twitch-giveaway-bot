@@ -1,5 +1,21 @@
 import aiohttp
+from datetime import datetime, timezone
 from typing import Any, Optional
+
+
+
+def parse_twitch_utc_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    dt = datetime.fromisoformat(raw)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 class TwitchAPI:
     """Minimal Helix client using an App Access Token (client_credentials)."""
