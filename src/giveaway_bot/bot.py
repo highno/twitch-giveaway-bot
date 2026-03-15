@@ -4,6 +4,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+EVENTSUB_CHANNELS_PER_CONNECTION = 5
+
 from giveaway_bot.config import Config
 from giveaway_bot.db import Database
 from giveaway_bot.twitch_api import TwitchAPI
@@ -295,10 +297,14 @@ async def amain():
         await irc.listen(on_privmsg=on_privmsg, on_join=on_join, on_part=on_part)
 
     # EventSub (reconnect + token refresh)
-    eventsub = EventSubWS(cfg.twitch_client_id, token_mgr)
+    channel_id_chunks = [channel_ids[i:i + EVENTSUB_CHANNELS_PER_CONNECTION] for i in range(0, len(channel_ids), EVENTSUB_CHANNELS_PER_CONNECTION)]
 
-    async def subscribe_all():
-        for _, cid in channel_login_to_id.items():
+    eventsub_clients: list[tuple[EventSubWS, list[int]]] = [
+        (EventSubWS(cfg.twitch_client_id, token_mgr), chunk) for chunk in channel_id_chunks
+    ]
+
+    async def subscribe_chunk(eventsub: EventSubWS, chunk: list[int]):
+        for cid in chunk:
             await eventsub.create_subscription("stream.online", "1", {"broadcaster_user_id": str(cid)})
             await eventsub.create_subscription("stream.offline", "1", {"broadcaster_user_id": str(cid)})
 
@@ -330,8 +336,9 @@ async def amain():
             await db.close_session(cid, ended_at)
             log.info("OFFLINE: channel_id=%s", cid)
 
-    async def eventsub_loop():
-        await eventsub.run(on_msg=on_eventsub, subscribe_fn=subscribe_all)
+    async def eventsub_loop(eventsub: EventSubWS, chunk: list[int], index: int):
+        log.info("Starting EventSub shard %s for %s channels", index + 1, len(chunk))
+        await eventsub.run(on_msg=on_eventsub, subscribe_fn=lambda: subscribe_chunk(eventsub, chunk))
 
     async def on_ticket_issued(channel_id: int, session_id: int, user_login: str, bucket_start: datetime):
         channel_login = channel_id_to_login.get(channel_id, str(channel_id))
@@ -345,11 +352,19 @@ async def amain():
 
     scheduler = TicketScheduler(db, cfg.ticket_interval_minutes, presence, on_ticket_issued=on_ticket_issued)
 
-    await asyncio.gather(
+    tasks = [
         run_with_backoff(irc_loop, "irc"),
-        run_with_backoff(eventsub_loop, "eventsub"),
         run_with_backoff(lambda: scheduler.run(channel_ids), "scheduler"),
-    )
+    ]
+    for index, (eventsub, chunk) in enumerate(eventsub_clients):
+        tasks.append(
+            run_with_backoff(
+                lambda eventsub=eventsub, chunk=chunk, index=index: eventsub_loop(eventsub, chunk, index),
+                f"eventsub-{index + 1}",
+            )
+        )
+
+    await asyncio.gather(*tasks)
 
 
 def main():

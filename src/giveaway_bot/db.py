@@ -376,6 +376,24 @@ class Database:
         row = await self.fetchone(sql, tuple(args))
         return int((int(row["c"]) if row else 0) * ticket_interval_minutes)
 
+
+    async def list_channels(self) -> list[dict[str, Any]]:
+        return await self.fetchall(
+            "SELECT id, login, display_name FROM channels ORDER BY login ASC",
+            (),
+        )
+
+    async def list_known_users(self, limit: int = 2000) -> list[str]:
+        rows = await self.fetchall(
+            "SELECT user_login FROM ("
+            " SELECT user_login FROM tickets"
+            " UNION SELECT user_login FROM presence_events"
+            " UNION SELECT user_login FROM global_opt_ins"
+            ") u ORDER BY user_login ASC LIMIT %s",
+            (limit,),
+        )
+        return [str(row["user_login"]) for row in rows]
+
     async def user_ticket_leaderboard(self, limit: int = 200) -> list[dict[str, Any]]:
         return await self.fetchall(
             "SELECT user_login, COUNT(*) AS tickets FROM tickets GROUP BY user_login ORDER BY tickets DESC, user_login ASC LIMIT %s",
