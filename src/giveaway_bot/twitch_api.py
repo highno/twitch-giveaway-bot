@@ -37,3 +37,16 @@ class TwitchAPI:
                 if r.status != 200:
                     raise RuntimeError(f"get_users failed {r.status}: {data}")
                 return data.get("data", [])
+
+    async def get_streams_by_user_ids(self, user_ids: list[int]) -> list[dict[str, Any]]:
+        if not user_ids:
+            return []
+        token = await self._get_app_token()
+        headers = {"Client-Id": self.client_id, "Authorization": f"Bearer {token}"}
+        params = [("user_id", str(uid)) for uid in user_ids]
+        async with aiohttp.ClientSession() as s:
+            async with s.get("https://api.twitch.tv/helix/streams", headers=headers, params=params) as r:
+                data = await r.json()
+                if r.status != 200:
+                    raise RuntimeError(f"get_streams failed {r.status}: {data}")
+                return data.get("data", [])

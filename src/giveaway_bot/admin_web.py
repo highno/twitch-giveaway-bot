@@ -565,8 +565,10 @@ async def draw_get(request: web.Request):
     sessions = await db.list_sessions(limit=300)
     rows = "".join(
         f"<tr><td><input type='checkbox' name='sessions' value='{session['session_id']}'/></td><td data-sort-value='{session['session_id']}'>{session['session_id']}</td>"
-        f"<td data-sort-value='{session['channel_id']}'>{session['channel_id']}</td><td data-sort-value='{as_iso(session['started_at'])}'>{local_dt_span(session['started_at'])}</td>"
-        f"<td data-sort-value='{as_iso(session['ended_at'])}'>{local_dt_span(session['ended_at'])}</td><td>{escape(str(session['title'] or ''))}</td></tr>"
+        f"<td data-sort-value='{escape(str(session['channel_login'] or ''))}'>{escape(str(session['channel_login'] or session['channel_id']))}</td>"
+        f"<td data-sort-value='{as_iso(session['started_at'])}'>{local_dt_span(session['started_at'])}</td>"
+        f"<td data-sort-value='{as_iso(session['ended_at'])}'>{local_dt_span(session['ended_at'])}</td>"
+        f"<td>{escape(str(session['stream_id'] or '-'))}</td><td>{escape(str(session['title'] or ''))}</td></tr>"
         for session in sessions
     )
     body = f"""
@@ -579,7 +581,7 @@ async def draw_get(request: web.Request):
   </div>
   <label class='checkbox'><input type='checkbox' name='exclude_previous_winners' value='1'/> Frühere Gewinner ausschließen</label>
   <div class='table-wrap'>
-    <table data-enhanced='1' data-page-size='30'><thead><tr><th data-sort-index='0'></th><th data-sort-index='1' data-sort-type='number'>Session</th><th data-sort-index='2' data-sort-type='number'>Kanal</th><th data-sort-index='3' data-sort-type='datetime'>Start</th><th data-sort-index='4' data-sort-type='datetime'>Ende</th><th data-sort-index='5'>Titel</th></tr></thead><tbody>{rows}</tbody></table>
+    <table data-enhanced='1' data-page-size='30'><thead><tr><th data-sort-index='0'></th><th data-sort-index='1' data-sort-type='number'>Session</th><th data-sort-index='2'>Kanal</th><th data-sort-index='3' data-sort-type='datetime'>Start</th><th data-sort-index='4' data-sort-type='datetime'>Ende</th><th data-sort-index='5'>Stream-ID</th><th data-sort-index='6'>Titel</th></tr></thead><tbody>{rows}</tbody></table>
   </div>
   <div><button class='primary' type='submit'>Auslosen</button></div>
 </form>
