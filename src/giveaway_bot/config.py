@@ -67,6 +67,7 @@ class Config:
     )
 
     ticket_interval_minutes: int = int(os.getenv("TICKET_INTERVAL_MINUTES", "10"))
+    eventsub_channels_per_connection: int = max(1, int(os.getenv("EVENTSUB_CHANNELS_PER_CONNECTION", "1")))
 
     ignored_logins: set[str] = None
     ignore_verified_bots: bool = _bool("IGNORE_VERIFIED_BOTS", "1")
