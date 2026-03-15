@@ -23,6 +23,14 @@ def as_iso(value: Optional[datetime]) -> str:
     return value.isoformat(sep=" ") if value else ""
 
 
+def local_dt_span(value: Optional[datetime]) -> str:
+    raw = as_iso(value)
+    if not raw:
+        return "-"
+    safe = escape(raw)
+    return f"<span class='js-local-dt' data-utc-datetime='{safe}'>{safe}</span>"
+
+
 def app_href(request: web.Request, path: str = "") -> str:
     prefix = request.app["base_prefix"]
     suffix = path if path.startswith("/") else f"/{path}" if path else ""
@@ -39,6 +47,7 @@ def nav_html(request: web.Request) -> str:
         f"<a href='{app_href(request, '/users')}' >User-Details</a>"
         f"<a href='{app_href(request, '/draw')}' >Auslosung</a>"
         f"<a href='{app_href(request, '/draw-runs')}' >Auslosungs-Ergebnisse</a>"
+        "<button type='button' id='theme-toggle' class='theme-toggle'>🌙 Dark</button>"
         "</nav>"
     )
 
@@ -52,6 +61,25 @@ def render_page(request: web.Request, title: str, body: str) -> str:
   <title>{escape(title)}</title>
   <style>
     :root {{
+      color-scheme: dark;
+      --bg: #0f1624;
+      --panel: #172033;
+      --panel-border: #2a3753;
+      --text: #ecf1fb;
+      --muted: #9eb0cc;
+      --accent: #8b9dff;
+      --accent-soft: #2a3656;
+      --danger: #ff8b8b;
+      --ok: #5bd9a1;
+      --card-bg: #1b2740;
+      --input-bg: #121b2d;
+      --th-bg: #1f2b43;
+      --th-text: #c8d5ed;
+      --sort-indicator: #7f92b6;
+    }}
+
+    :root[data-theme='light'] {{
+      color-scheme: light;
       --bg: #f3f5f9;
       --panel: #ffffff;
       --panel-border: #dde3ee;
@@ -61,6 +89,11 @@ def render_page(request: web.Request, title: str, body: str) -> str:
       --accent-soft: #edf0ff;
       --danger: #b42318;
       --ok: #067647;
+      --card-bg: #fcfdff;
+      --input-bg: #ffffff;
+      --th-bg: #f8f9fc;
+      --th-text: #243447;
+      --sort-indicator: #90a0b8;
     }}
 
     * {{ box-sizing: border-box; }}
@@ -92,6 +125,7 @@ def render_page(request: web.Request, title: str, body: str) -> str:
       padding: 0.45rem 0.75rem;
     }}
     .top-nav a:hover {{ background: var(--accent-soft); color: var(--accent); }}
+    .theme-toggle {{ margin-left: auto; }}
 
     .panel {{
       background: var(--panel);
@@ -107,7 +141,7 @@ def render_page(request: web.Request, title: str, body: str) -> str:
       border: 1px solid var(--panel-border);
       border-radius: 10px;
       padding: 0.9rem;
-      background: #fcfdff;
+      background: var(--card-bg);
     }}
     .metric-value {{ font-size: 1.6rem; font-weight: 700; margin-top: 0.35rem; }}
 
@@ -119,7 +153,7 @@ def render_page(request: web.Request, title: str, body: str) -> str:
       font: inherit;
       border-radius: 8px;
       border: 1px solid var(--panel-border);
-      background: #fff;
+      background: var(--input-bg);
       color: var(--text);
       padding: 0.5rem 0.65rem;
       min-height: 2.2rem;
@@ -134,14 +168,14 @@ def render_page(request: web.Request, title: str, body: str) -> str:
     table {{ width: 100%; border-collapse: collapse; }}
     th, td {{ padding: 0.55rem; border-bottom: 1px solid var(--panel-border); vertical-align: top; }}
     th {{
-      background: #f8f9fc;
+      background: var(--th-bg);
       text-align: left;
       font-size: 0.9rem;
       white-space: nowrap;
-      color: #243447;
+      color: var(--th-text);
     }}
     th.sortable {{ cursor: pointer; user-select: none; }}
-    th.sortable::after {{ content: " ↕"; color: #90a0b8; font-size: 0.85em; }}
+    th.sortable::after {{ content: " ↕"; color: var(--sort-indicator); font-size: 0.85em; }}
 
     .table-wrap {{ overflow: auto; }}
     .table-footer {{
@@ -166,6 +200,27 @@ def render_page(request: web.Request, title: str, body: str) -> str:
 </div>
 <script>
 (function() {{
+  function applyTheme() {{
+    const root = document.documentElement;
+    const stored = localStorage.getItem('admin-theme');
+    const theme = stored === 'light' ? 'light' : 'dark';
+    root.dataset.theme = theme;
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.textContent = theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+  }}
+
+  function formatLocalDateTimes() {{
+    document.querySelectorAll('.js-local-dt').forEach((node) => {{
+      const raw = (node.dataset.utcDatetime || '').trim();
+      if (!raw) return;
+      const dt = new Date(raw.replace(' ', 'T') + 'Z');
+      if (Number.isNaN(dt.getTime())) return;
+      node.textContent = dt.toLocaleString('de-DE');
+      node.dataset.sortValue = String(dt.getTime());
+      node.title = `UTC: ${raw}`;
+    }});
+  }}
+
   function parseValue(value, type) {{
     const v = (value || '').trim();
     if (type === 'number') {{
@@ -173,17 +228,31 @@ def render_page(request: web.Request, title: str, body: str) -> str:
       return Number.isNaN(n) ? Number.NEGATIVE_INFINITY : n;
     }}
     if (type === 'datetime') {{
+      const timestamp = Number(v);
+      if (!Number.isNaN(timestamp) && timestamp > 0) return timestamp;
       const t = Date.parse(v.replace(' ', 'T'));
       return Number.isNaN(t) ? 0 : t;
     }}
     return v.toLowerCase();
   }}
 
+  applyTheme();
+  document.getElementById('theme-toggle')?.addEventListener('click', () => {{
+    const root = document.documentElement;
+    const next = root.dataset.theme === 'light' ? 'dark' : 'light';
+    localStorage.setItem('admin-theme', next);
+    applyTheme();
+  }});
+  formatLocalDateTimes();
+
   document.querySelectorAll('table[data-enhanced="1"]').forEach((table) => {{
     const tbody = table.querySelector('tbody');
     if (!tbody) return;
     const rows = Array.from(tbody.querySelectorAll('tr'));
     const pageSize = Math.max(1, Number(table.dataset.pageSize || 25));
+    const defaultSortIndex = table.dataset.defaultSortIndex;
+    const defaultSortType = table.dataset.defaultSortType || 'text';
+    const defaultSortDir = table.dataset.defaultSortDir === 'asc' ? 'asc' : 'desc';
     let page = 1;
 
     const wrapper = table.closest('.table-wrap') || table.parentElement;
@@ -206,6 +275,19 @@ def render_page(request: web.Request, title: str, body: str) -> str:
     footer.querySelector('.prev').addEventListener('click', () => {{ page -= 1; renderPage(); }});
     footer.querySelector('.next').addEventListener('click', () => {{ page += 1; renderPage(); }});
 
+    function sortTable(idx, type, asc) {{
+      rows.sort((a, b) => {{
+        const av = parseValue((a.children[idx]?.dataset.sortValue || a.children[idx]?.innerText || ''), type);
+        const bv = parseValue((b.children[idx]?.dataset.sortValue || b.children[idx]?.innerText || ''), type);
+        if (av === bv) return 0;
+        if (av > bv) return asc ? 1 : -1;
+        return asc ? -1 : 1;
+      }});
+      rows.forEach((row) => tbody.appendChild(row));
+      page = 1;
+      renderPage();
+    }}
+
     table.querySelectorAll('th[data-sort-index]').forEach((th) => {{
       th.classList.add('sortable');
       th.addEventListener('click', () => {{
@@ -214,18 +296,19 @@ def render_page(request: web.Request, title: str, body: str) -> str:
         const asc = th.dataset.sortDir !== 'asc';
         table.querySelectorAll('th[data-sort-index]').forEach((h) => delete h.dataset.sortDir);
         th.dataset.sortDir = asc ? 'asc' : 'desc';
-        rows.sort((a, b) => {{
-          const av = parseValue((a.children[idx]?.dataset.sortValue || a.children[idx]?.innerText || ''), type);
-          const bv = parseValue((b.children[idx]?.dataset.sortValue || b.children[idx]?.innerText || ''), type);
-          if (av === bv) return 0;
-          if (av > bv) return asc ? 1 : -1;
-          return asc ? -1 : 1;
-        }});
-        rows.forEach((row) => tbody.appendChild(row));
-        page = 1;
-        renderPage();
+        sortTable(idx, type, asc);
       }});
     }});
+
+    if (defaultSortIndex !== undefined) {{
+      const idx = Number(defaultSortIndex);
+      if (!Number.isNaN(idx)) {{
+        const th = table.querySelector(`th[data-sort-index="${{idx}}"]`);
+        if (th) th.dataset.sortDir = defaultSortDir;
+        sortTable(idx, defaultSortType, defaultSortDir === 'asc');
+        return;
+      }}
+    }}
 
     renderPage();
   }});
@@ -280,6 +363,22 @@ async def dashboard(request: web.Request):
     <div class='card'><div>Top User (Tickets)</div><div class='metric-value'>{escape(ticket_rows[0]['user_login']) if ticket_rows else '-'}</div></div>
   </div>
 </div>
+
+<div class='panel'>
+  <h2>Gesammelte Tickets pro User</h2>
+  <p class='hint'>Initial nach Ticketanzahl sortiert, alternativ nach Username sortierbar.</p>
+  <div class='table-wrap'>
+    <table data-enhanced='1' data-page-size='25' data-default-sort-index='1' data-default-sort-type='number' data-default-sort-dir='desc'>
+      <thead>
+        <tr>
+          <th data-sort-index='0'>User</th>
+          <th data-sort-index='1' data-sort-type='number'>Tickets</th>
+        </tr>
+      </thead>
+      <tbody>{''.join(f"<tr><td>{escape(row['user_login'])}</td><td data-sort-value='{int(row['tickets'])}'>{int(row['tickets'])}</td></tr>" for row in all_tickets)}</tbody>
+    </table>
+  </div>
+</div>
 """
     return web.Response(text=render_page(request, "Dashboard", body), content_type="text/html")
 
@@ -323,7 +422,7 @@ async def stats(request: web.Request):
     )
     present_html = "".join(
         f"<tr><td data-sort-value='{row['channel_id']}'>{row['channel_id']}</td><td>{escape(row['channel_login'])}</td>"
-        f"<td>{escape(row['user_login'])}</td><td data-sort-value='{as_iso(row['joined_at'])}'>{as_iso(row['joined_at'])}</td></tr>"
+        f"<td>{escape(row['user_login'])}</td><td data-sort-value='{as_iso(row['joined_at'])}'>{local_dt_span(row['joined_at'])}</td></tr>"
         for row in present_rows
     )
 
@@ -411,13 +510,13 @@ async def users(request: web.Request):
 
     ticket_html = "".join(
         f"<tr><td data-sort-value='{row['channel_id']}'>{row['channel_id']}</td><td>{escape(row['channel_login'])}</td>"
-        f"<td data-sort-value='{as_iso(row['bucket_start'])}'>{as_iso(row['bucket_start'])}</td><td data-sort-value='{as_iso(row['issued_at'])}'>{as_iso(row['issued_at'])}</td>"
-        f"<td>{as_iso(row['bucket_start'])} - {as_iso(row['issued_at'])}</td></tr>"
+        f"<td data-sort-value='{as_iso(row['bucket_start'])}'>{local_dt_span(row['bucket_start'])}</td><td data-sort-value='{as_iso(row['issued_at'])}'>{local_dt_span(row['issued_at'])}</td>"
+        f"<td>{local_dt_span(row['bucket_start'])} - {local_dt_span(row['issued_at'])}</td></tr>"
         for row in ticket_rows
     )
     presence_html = "".join(
         f"<tr><td data-sort-value='{row['channel_id']}'>{row['channel_id']}</td><td>{escape(row['channel_login'])}</td>"
-        f"<td>{escape(row['event_type'])}</td><td data-sort-value='{as_iso(row['event_ts'])}'>{as_iso(row['event_ts'])}</td></tr>"
+        f"<td>{escape(row['event_type'])}</td><td data-sort-value='{as_iso(row['event_ts'])}'>{local_dt_span(row['event_ts'])}</td></tr>"
         for row in presence_rows
     )
 
@@ -466,8 +565,8 @@ async def draw_get(request: web.Request):
     sessions = await db.list_sessions(limit=300)
     rows = "".join(
         f"<tr><td><input type='checkbox' name='sessions' value='{session['session_id']}'/></td><td data-sort-value='{session['session_id']}'>{session['session_id']}</td>"
-        f"<td data-sort-value='{session['channel_id']}'>{session['channel_id']}</td><td data-sort-value='{as_iso(session['started_at'])}'>{as_iso(session['started_at'])}</td>"
-        f"<td data-sort-value='{as_iso(session['ended_at'])}'>{as_iso(session['ended_at'])}</td><td>{escape(str(session['title'] or ''))}</td></tr>"
+        f"<td data-sort-value='{session['channel_id']}'>{session['channel_id']}</td><td data-sort-value='{as_iso(session['started_at'])}'>{local_dt_span(session['started_at'])}</td>"
+        f"<td data-sort-value='{as_iso(session['ended_at'])}'>{local_dt_span(session['ended_at'])}</td><td>{escape(str(session['title'] or ''))}</td></tr>"
         for session in sessions
     )
     body = f"""
@@ -533,7 +632,7 @@ async def draw_runs(request: web.Request):
         winners = await db.draw_winners(run["draw_id"])
         winner_list = ", ".join(f"{winner['user_login']} ({winner['weight_tickets']})" for winner in winners) or "-"
         rows.append(
-            f"<tr><td data-sort-value='{run['draw_id']}'>{run['draw_id']}</td><td data-sort-value='{as_iso(run['created_at'])}'>{as_iso(run['created_at'])}</td>"
+            f"<tr><td data-sort-value='{run['draw_id']}'>{run['draw_id']}</td><td data-sort-value='{as_iso(run['created_at'])}'>{local_dt_span(run['created_at'])}</td>"
             f"<td>{escape(str(run['description'] or ''))}</td><td>{escape(winner_list)}</td>"
             f"<td><form class='inline' method='post' action='{app_href(request, '/draw-runs/delete')}'><input type='hidden' name='draw_id' value='{run['draw_id']}'/><button type='submit'>Löschen</button></form></td></tr>"
         )
