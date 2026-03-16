@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS stream_sessions (
   title VARCHAR(255) NULL,
   category VARCHAR(255) NULL,
   is_live TINYINT NOT NULL DEFAULT 1,
-  UNIQUE KEY uniq_open_session (channel_id, is_live),
+  open_slot TINYINT GENERATED ALWAYS AS (CASE WHEN is_live=1 THEN 1 ELSE NULL END) STORED,
+  UNIQUE KEY uniq_open_session (channel_id, open_slot),
   FOREIGN KEY (channel_id) REFERENCES channels(id)
 );
 
