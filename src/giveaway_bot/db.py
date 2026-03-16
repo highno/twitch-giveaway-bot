@@ -105,19 +105,40 @@ class Database:
         category: Optional[str],
         stream_id: Optional[str] = None,
     ) -> int:
-        await self.exec(
-            "UPDATE stream_sessions SET is_live=0, ended_at=IFNULL(ended_at,%s) "
-            "WHERE channel_id=%s AND is_live=1",
-            (started_at, channel_id),
-        )
-        await self.exec(
-            "INSERT INTO stream_sessions(channel_id, started_at, title, category, stream_id, is_live) "
-            "VALUES(%s,%s,%s,%s,%s,1)",
-            (channel_id, started_at, title, category, stream_id),
-        )
+        try:
+            await self.exec(
+                "UPDATE stream_sessions SET is_live=0, ended_at=IFNULL(ended_at,%s) "
+                "WHERE channel_id=%s AND is_live=1",
+                (started_at, channel_id),
+            )
+        except Exception as e:
+            # Reconcile/EventSub may race while transitioning a live session.
+            # A duplicate on close means another row already occupies the non-live slot.
+            if _mysql_err_code(e) != MYSQL_DUPLICATE_KEY:
+                raise
+
+        try:
+            await self.exec(
+                "INSERT INTO stream_sessions(channel_id, started_at, title, category, stream_id, is_live) "
+                "VALUES(%s,%s,%s,%s,%s,1)",
+                (channel_id, started_at, title, category, stream_id),
+            )
+        except Exception as e:
+            if _mysql_err_code(e) != MYSQL_DUPLICATE_KEY:
+                raise
+            # Already opened concurrently; continue by returning that open session.
+
         row = await self.fetchone(
             "SELECT session_id FROM stream_sessions WHERE channel_id=%s AND is_live=1 ORDER BY session_id DESC LIMIT 1",
             (channel_id,),
+        )
+        if not row:
+            raise RuntimeError(f"Could not resolve open live session for channel_id={channel_id}")
+        await self.touch_session_heartbeat(
+            int(row["session_id"]),
+            title=title,
+            category=category,
+            stream_id=stream_id,
         )
         return int(row["session_id"])
 
